@@ -5,11 +5,17 @@ Megaliths of a Tilted World - V2 Analysis Code
 Reproduces all findings in the report.
 
 Usage:
-    python analysis.py              # Run everything
+    python analysis.py              # Run everything (2 deg grid, matches report exactly)
+    python analysis.py --fast       # Use 4 deg grid (faster, slightly different numbers)
     python analysis.py --section 1  # Run specific section
-    python analysis.py --quick      # Skip Monte Carlo (fast)
+    python analysis.py --quick      # Skip Monte Carlo
 
-Requires: numpy, matplotlib (for charts)
+Grid resolution: The report uses a 2 deg grid (16,380 pole positions). This is
+the default. The --fast flag uses a 4 deg grid which runs ~4x faster but may
+produce slightly different optimal tilts (typically within 2-4 deg) and site
+counts (within 1-2) due to coarser sampling.
+
+Requires: numpy, matplotlib (for charts only)
 """
 
 import json, math, os, sys
@@ -17,6 +23,9 @@ import numpy as np
 
 EARTH_R = 6371.0
 TDEG500 = math.degrees(500 / EARTH_R)
+
+# Grid resolution: 2 deg matches report, 4 deg is faster
+GRID = 2  # default, overridden by --fast
 
 # ============================================================
 # Core functions
@@ -39,14 +48,14 @@ def point_dist(lat1, lon1, lat2, lon2):
     xyz2 = ll2xyz(lat2, lon2)
     return math.acos(np.clip(np.dot(xyz1, xyz2), -1, 1)) * EARTH_R
 
-def optimize_median(site_list, grid_lat=2, grid_lon=4):
+def optimize_median(site_list):
     """Find pole that minimizes median distance to sites."""
     if len(site_list) < 3:
         return None, None, None
     best_med = 99999
     best_pole = None
-    for lat in range(-90, 91, grid_lat):
-        for lon in range(-180, 180, grid_lon):
+    for lat in range(-90, 91, GRID):
+        for lon in range(-180, 180, GRID):
             p = ll2xyz(lat, lon)
             dts = np.array([dist_to_gc(s["lat"], s["lon"], p) for s in site_list])
             med = float(np.median(dts))
@@ -56,15 +65,15 @@ def optimize_median(site_list, grid_lat=2, grid_lon=4):
     tilt = 90 - abs(best_pole[0])
     return tilt, best_med, best_pole
 
-def optimize_500(site_list, grid_lat=2, grid_lon=2):
+def optimize_500(site_list):
     """Find pole that maximizes sites within 500 km."""
     if len(site_list) < 3:
         return None, None, None
     xyzs = np.array([ll2xyz(s["lat"], s["lon"]) for s in site_list])
     best_count = 0
     best_pole = None
-    for lat in range(-90, 91, grid_lat):
-        for lon in range(-180, 180, grid_lon):
+    for lat in range(-90, 91, GRID):
+        for lon in range(-180, 180, GRID):
             p = ll2xyz(lat, lon)
             dots = np.abs(xyzs @ p)
             angs = np.arccos(np.clip(dots, 0, 1)) * 180 / np.pi
@@ -128,14 +137,14 @@ def section1(sites):
     xyzs = np.array([ll2xyz(s["lat"], s["lon"]) for s in sites])
     pole_n = ll2xyz(90, 0)
     
-    print(f"\nTilt scan (all 88 sites, 500 km):")
+    print(f"\nTilt scan (all 88 sites, 500 km, {GRID} deg grid):")
     print(f"{'Tilt':>5s} {'<500km':>7s} {'<1000km':>8s} {'Closer%':>8s} {'Median':>8s}")
     
     for tilt in range(0, 91, 5):
         plat = 90 - tilt
         best_c = 0
         best_pole = None
-        for plon in range(-180, 180, 4):
+        for plon in range(-180, 180, GRID):
             for sign in [1, -1]:
                 p = ll2xyz(sign * plat, plon)
                 dots = np.abs(xyzs @ p)
@@ -184,8 +193,6 @@ def section3(sites):
     print("SECTION 3: MASONRY CLASSIFICATION")
     print("="*60)
     
-    pole = ll2xyz(-56, 30)
-    
     for m in range(5):
         sl = [s for s in sites if s["masonry"] >= m]
         cl = sum(1 for s in sl if s["dt"] < s["dc"])
@@ -223,27 +230,16 @@ def section4(sites):
     print(f"\n{'Filter':45s} {'N':>3s}  {'Tilt':>6s}  {'Med':>5s}  {'Cl%':>6s}  {'28-38?':>6s}")
     print("-" * 80)
     
-    # Masonry
     for m in range(5):
         report(f"M>={m}", [s for s in sites if s["masonry"] >= m])
-    
-    # Mass
     for mt in [10, 50, 100, 200]:
         report(f"Mass >= {mt}t", [s for s in sites if s["max_tons"] >= mt and s["name"] not in IN_SITU])
-    
-    # Hardness
     for mh in [4, 5, 6, 7]:
         report(f"Mohs >= {mh}", [s for s in sites if s["mohs"] >= mh])
-    
-    # Precision
     for pr in [2, 3, 4]:
         report(f"Precision >= {pr}", [s for s in sites if s["precision"] >= pr])
-    
-    # Combined score
     for sc in [5, 6, 7]:
         report(f"Score >= {sc}", [s for s in sites if s["combined"] >= sc])
-    
-    # Regions
     for rname, rfilt in [
         ("Europe", lambda s: s["region"] == "Europe"),
         ("Egypt", lambda s: s["region"] == "Egypt"),
@@ -252,8 +248,6 @@ def section4(sites):
         ("India", lambda s: s["region"] == "India"),
     ]:
         report(rname, [s for s in sites if rfilt(s)])
-    
-    # Combinations
     report("Mass>=50t + Polygonal", [s for s in sites if s["max_tons"]>=50 and s["masonry"]>=3 and s["name"] not in IN_SITU])
     report("Mass>=50t + Prec>=3", [s for s in sites if s["max_tons"]>=50 and s["precision"]>=3 and s["name"] not in IN_SITU])
 
@@ -274,21 +268,17 @@ def section5(sites):
         cl = sum(1 for s in sl if s["dt"] < s["dc"])
         print(f"  >={sc:1d}  {len(sl):4d}  {tilt:4d}  {med:6.0f}  {cl:3d}/{len(sl):2d}  {cl/len(sl)*100:5.1f}%")
     
-    # Score >= 7 sites
     s7 = [s for s in sites if s["combined"] >= 7]
     print(f"\nScore >= 7 sites ({len(s7)}):")
     for s in sorted(s7, key=lambda x: x["dt"]):
         cl = "T" if s["dt"] < s["dc"] else "C"
         print(f"  {cl} {s['dt']:7.0f}km  M{s['masonry']}+P{s['precision']}={s['combined']}  {s['name']:30s}  {s['region']}")
     
-    # Randomization test
     print("\nPrecision score randomization (10,000 trials)...")
     np.random.seed(42)
     actual_pct = sum(1 for s in s7 if s["dt"] < s["dc"]) / len(s7) * 100
-    
     masonry_vals = [s["masonry"] for s in sites]
     precision_vals = [s["precision"] for s in sites]
-    
     match_count = 0
     for trial in range(10000):
         shuffled_p = np.random.permutation(precision_vals)
@@ -298,7 +288,6 @@ def section5(sites):
             cl = sum(1 for i in high if sites[i]["dt"] < sites[i]["dc"])
             if cl / len(high) * 100 >= actual_pct:
                 match_count += 1
-    
     print(f"  Actual: {actual_pct:.1f}%")
     print(f"  Random achieving same: {match_count}/10000 ({match_count/100:.2f}%)")
 
@@ -323,12 +312,10 @@ def section6(sites):
             dt = dist_to_gc(lat_m, lon_m, ll2xyz(-56, 30))
             dc = dist_to_gc(lat_m, lon_m, ll2xyz(90, 0))
             centroids.append({"lat": lat_m, "lon": lon_m, "dt": dt, "dc": dc})
-        
         ct = sum(1 for c in centroids if c["dt"] < c["dc"])
         tilt, med, _ = optimize_median(centroids)
         print(f"  r={radius:5d}km: {len(cls):2d} clusters, {ct}/{len(cls)} closer ({ct/len(cls)*100:.0f}%), tilt={tilt}, med={med:.0f}km")
     
-    # Leave-one-region-out
     print(f"\nLeave-one-region-out (score >= 7):")
     from collections import Counter
     regions = Counter(s["region"] for s in s7)
@@ -350,15 +337,13 @@ def section7(sites, quick=False):
     s7 = [s for s in sites if s["combined"] >= 7]
     xyzs_s7 = np.array([ll2xyz(s["lat"], s["lon"]) for s in s7])
     
-    # Find optimized actual count
     tilt_opt, actual_500, pole_opt = optimize_500(s7)
     print(f"\nOptimized pole for score >= 7: tilt={tilt_opt}, captures {actual_500}/{len(s7)}")
     
-    # Competitor circles
-    print(f"\nCompetitor circles (score >= 7, full scan):")
+    print(f"\nCompetitor circles (score >= 7, full scan, {GRID} deg grid):")
     best_counts = {}
-    for lat in range(-90, 91, 2):
-        for lon in range(-180, 180, 2):
+    for lat in range(-90, 91, GRID):
+        for lon in range(-180, 180, GRID):
             p = ll2xyz(lat, lon)
             dots = np.abs(xyzs_s7 @ p)
             angs = np.arccos(np.clip(dots, 0, 1)) * 180 / np.pi
@@ -390,20 +375,17 @@ def section7(sites, quick=False):
         print("\n  [--quick mode: skipping Monte Carlo]")
         return
     
-    # Monte Carlo
     np.random.seed(42)
     n_trials = 500
     print(f"\nMonte Carlo ({n_trials} trials, latitude-preserving)...")
     
     lats = np.array([s["lat"] for s in s7])
-    pole_grid = [ll2xyz(lat, lon) for lat in range(-90, 91, 6) for lon in range(-180, 180, 8)]
-    pole_grid = np.array(pole_grid)
+    pole_grid = np.array([ll2xyz(lat, lon) for lat in range(-90, 91, 6) for lon in range(-180, 180, 8)])
     
     mc_counts = []
     for trial in range(n_trials):
         rand_lons = np.random.uniform(-180, 180, len(s7))
         rxyz = np.array([ll2xyz(lats[j], rand_lons[j]) for j in range(len(s7))])
-        
         best = 0
         for p in pole_grid:
             dots = np.abs(rxyz @ p)
@@ -426,12 +408,22 @@ def section7(sites, quick=False):
 # ============================================================
 
 def main():
+    global GRID
+    
+    fast = "--fast" in sys.argv
     quick = "--quick" in sys.argv
     section_filter = None
     if "--section" in sys.argv:
         idx = sys.argv.index("--section")
         if idx + 1 < len(sys.argv):
             section_filter = int(sys.argv[idx + 1])
+    
+    if fast:
+        GRID = 4
+        print(f"Fast mode: using {GRID} deg grid (results may differ slightly from report)")
+    else:
+        GRID = 2
+        print(f"Using {GRID} deg grid (matches report exactly)")
     
     sites = load_sites()
     print(f"Loaded {len(sites)} sites.")

@@ -7,12 +7,17 @@
 ## Quick Start
 
 ```bash
-python analysis.py          # Run all analyses
-python analysis.py --quick  # Skip Monte Carlo (faster)
+python analysis.py              # Run all (2° grid, matches report exactly)
+python analysis.py --fast       # Run all (4° grid, ~4x faster, slightly different numbers)
 python analysis.py --section 4  # Run only Section 4 (filters)
+python analysis.py --quick      # Skip Monte Carlo
 ```
 
 Requires: Python 3.8+, NumPy, matplotlib (for charts only)
+
+### Grid resolution
+
+The report uses a 2° pole grid (16,380 positions). This is the default. The `--fast` flag uses a 4° grid which runs faster but may produce slightly different optimal tilts (within 2-4°) and site counts (within 1-2) due to coarser sampling. For exact reproduction of report numbers, use the default.
 
 ## Files
 
