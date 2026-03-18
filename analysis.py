@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Megaliths of a Tilted World - V2 Analysis Code
+Megaliths of a Tilted World - Analysis Code
 ================================================
 Reproduces all findings in the report.
 

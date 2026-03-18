@@ -1,4 +1,4 @@
-# Megaliths of a Tilted World - V2
+# Megaliths of a Tilted World
 
 **An observational data note. Not peer-reviewed.**
 
